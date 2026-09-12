@@ -1,0 +1,231 @@
+{
+  "version": "10.8",
+  "description": "Ghostfolio 每日持仓诊断 - 本地数据采集 + 公开量化规则判定（Lean/freqtrade 源码，不自造阈值） + ML 研究参考（无买卖权） + LLM 中文解释 + 风控与组合参考",
+  "portfolio": {
+    "risk_budget": {
+      "max_gross_exposure": 1.0,
+      "max_single_position": 0.25,
+      "max_sector_concentration": 0.4,
+      "max_crypto_allocation": 0.3,
+      "max_correlation_cluster": 0.5
+    },
+    "_note": "blend_policy / rebalance_threshold 已于 v10.1 删除 —— 它们是自研评分体系的残留，没有任何 .py 消费（grep 验证过）。死配置会误导维护者以为还在生效。"
+  },
+  "special_assets": {
+    "SGOV": {
+      "reasons": [
+        "货币基金，现金管理"
+      ],
+      "risks": [
+        "利率下行分红减少"
+      ],
+      "thesis": "SGOV 为货币市场基金，作为现金等价物配置，不参与主动择时",
+      "note": "不参与择时；判定层直接标 applicable=false，不产生 votes。状态值（signal=持有）由 collect.py **代码**给出，本配置块只放解释性字段。",
+      "_note": "不要把 signal 加回这里 —— 状态是事实层。v10.2 踩过：把配置里的 signal 删掉（以为与 applicable 重复）后，输出状态变成 None，还触发了一次假的「状态变化」告警（持有→None）。契约测试已加断言：applicable=false 的标的必须有 signal。"
+    }
+  },
+  "data_sources": {
+    "macro": {
+      "fred_series": {
+        "fed_funds_rate": "FEDFUNDS",
+        "10y_treasury": "DGS10",
+        "2y_treasury": "DGS2",
+        "3m_treasury": "DGS3MO",
+        "cpi": "CPIAUCSL",
+        "dxy": "DTWEXBGS",
+        "unemployment": "UNRATE"
+      },
+      "yfinance_tickers": [
+        "^TNX",
+        "^IRX",
+        "^FVX",
+        "DX-Y.NYB",
+        "^VIX",
+        "^GSPC"
+      ],
+      "econdb_base": "https://www.econdb.com/api",
+      "fed_treasury_base": "https://api.fiscaldata.treasury.gov/services/api/fiscal_service"
+    },
+    "onchain": {
+      "coingecko_global": "https://api.coingecko.com/api/v3/global",
+      "defillama_stablecoins": "https://stablecoins.llama.fi/stablecoincharts/all",
+      "alternative_me_fng": "https://api.alternative.me/fng/",
+      "coincap_assets": "https://api.coincap.io/v2/assets",
+      "coinpaprika_tickers": "https://api.coinpaprika.com/v1/tickers",
+      "cryptocompare_price": "https://min-api.cryptocompare.com/data/pricemultifull",
+      "coinmetrics_community": "https://community-api.coinmetrics.io/v4"
+    },
+    "fundamentals": {
+      "yfinance_fundamentals": true,
+      "sec_edgar_base": "https://data.sec.gov/api"
+    }
+  },
+  "feature_engineering": {
+    "enabled": true,
+    "lookback_windows": [
+      5,
+      10,
+      20,
+      60,
+      120
+    ],
+    "zscore_windows": [
+      60,
+      120,
+      252
+    ],
+    "percentile_windows": [
+      252
+    ],
+    "price_history_enabled": true,
+    "price_history_period": "2y",
+    "_period_note": "判定所需的最大窗口 = 自身历史分位 252 根（1 年）；SMA200 需 200 根。**实测 250 根与 5 年结果 8/8 完全一致**（SMA 是固定窗口不预热；RSI/ADX/MACD 的 ewm 约 150 根收敛）。取 2 年 = 2 倍安全余量。原为 5y，白拉 2.5 倍。"
+  },
+  "news": {
+    "enabled": true,
+    "proxy": "http://192.168.2.5:7890",
+    "window_hours": 72,
+    "per_symbol": 3,
+    "timeout_s": 15,
+    "total_budget_s": 90,
+    "tv_symbol_map": {
+      "QQQ": "NASDAQ:QQQ",
+      "VOO": "AMEX:VOO",
+      "SCHD": "AMEX:SCHD",
+      "SMH": "NASDAQ:SMH",
+      "SIVR": "AMEX:SIVR",
+      "bitcoin": "CRYPTO:BTCUSD",
+      "ethereum": "CRYPTO:ETHUSD",
+      "binancecoin": "BINANCE:BNBUSDT"
+    },
+    "tv_symbol_map_note": "实测验证过，交易所前缀错一个字母就静默返回 0 条（AMEX:QQQ / NASDAQ:VOO / AMEX:SMH 全是 0）。SGOV 在 TradingView 无任何覆盖，故不列。",
+    "yahoo_symbol_map": {
+      "QQQ": "QQQ",
+      "VOO": "VOO",
+      "SCHD": "SCHD",
+      "SMH": "SMH",
+      "SIVR": "SIVR",
+      "SGOV": "SGOV",
+      "bitcoin": "BTC-USD",
+      "ethereum": "ETH-USD",
+      "binancecoin": "BNB-USD"
+    },
+    "yahoo_symbol_map_note": "覆盖 9/9（含 TradingView 无覆盖的 SGOV），作为兜底与补充源。",
+    "source_blacklist": [
+      "Stocktwits",
+      "Zacks",
+      "GuruFocus",
+      "U.Today",
+      "Coinpedia",
+      "CryptoProwl",
+      "Binance News"
+    ],
+    "source_blacklist_reason": "实测：QQQ 200 条里 131 条来自 Stocktwits（社交交易闲聊）；SCHD 78% 来自 Zacks（自动生成稿）；BNB 42% 来自 Binance News（交易所自营，有立场）。",
+    "source_whitelist": [
+      "Reuters",
+      "Dow Jones Newswires",
+      "MarketWatch",
+      "CNBC",
+      "Barron's",
+      "The Block",
+      "CoinDesk",
+      "Cointelegraph",
+      "Crypto Briefing",
+      "Bloomberg",
+      "Financial Times",
+      "WSJ",
+      "Associated Press"
+    ],
+    "source_midlist": [
+      "etf.com",
+      "Benzinga",
+      "Seeking Alpha",
+      "Barchart",
+      "Beincrypto",
+      "Decrypt"
+    ],
+    "macro_feeds": {
+      "美联储": "https://www.federalreserve.gov/feeds/press_all.xml",
+      "CNBC财经": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
+      "MarketWatch": "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+      "Nasdaq市场": "https://www.nasdaq.com/feed/rssoutbound?category=Markets"
+    },
+    "macro_keywords": [
+      "Fed",
+      "Federal Reserve",
+      "CPI",
+      "inflation",
+      "rate cut",
+      "rate hike",
+      "interest rate",
+      "jobs report",
+      "payrolls",
+      "recession",
+      "tariff",
+      "Powell",
+      "FOMC",
+      "GDP",
+      "treasury yield"
+    ],
+    "macro_max": 6,
+    "translate_required": true,
+    "translate_note": "标题为英文。报告要求全中文 —— 由主模型在「填分析师点评」同一步骤产出中文译述写入 news_translations，gen_report.py 只负责渲染。",
+    "source_lowlist": [
+      "24/7 Wall St",
+      "The Street",
+      "Motley Fool",
+      "Yahoo Finance",
+      "Investopedia",
+      "TradingView"
+    ],
+    "source_lowlist_reason": "内容农场/聚合稿：SCHD 与 SGOV 过滤后只剩这类「How a 68-Year-Old Earns...」标题，不是可用的消息面。降为最低档并限量。",
+    "low_tier_max": 1,
+    "fallback_window_hours": 336,
+    "fallback_note": "72h 内无新闻的冷门标的放宽到 14 天；实测 SIVR 最新一条真新闻在 2 个月前，放宽到 30 天也会塞入过期内容，故定 14 天。"
+  },
+  "retention": {
+    "price_rows": 600,
+    "news_days": 30,
+    "note": "每次跑完自动清理。价格 CSV 只留最近 600 行（约 2.4 倍余量，2 年数据），新闻 JSON 只留 30 天。判定所需窗口外的一律删除，防 Skill 臃肿。注：/opt/data/cache/fastembed(305M) 是 Hermes 自己的 embedding 缓存，与本 Skill 无关。"
+  },
+  "rules": {
+    "enabled": true,
+    "script": "ghostfolio_rules.py",
+    "principle": "**不用自造规则和阈值** —— 美股的买卖持有判定用 QuantConnect/Lean 的官方 Alpha 模型，加密货币用 freqtrade 的策略判定。两套完全分开。",
+    "why_split": "已核实官方文档：freqtrade官方 README 自述是「crypto trading bot」，支持列表全是加密交易所，**完全不含美股**，其参数按加密市场结构调校；Lean 官方文档确认支持 Equities/Crypto 等九类资产。",
+    "us_equity": {
+      "project": "QuantConnect/Lean (21,588⭐)",
+      "sources": [
+        "RsiAlphaModel.cs（RSI 状态机 30进/35出、70进/65出）",
+        "EmaCrossAlphaModel.cs（EMA12/26 位置）",
+        "MacdAlphaModel.cs（MACD信号/价格 ±BounceThresholdPercent=0.01）"
+      ],
+      "combine": "三模型各一票，多数胜；三方各一票时记「持有（无共识）」——不设人为倾向"
+    },
+    "crypto": {
+      "project": "freqtrade (54,274⭐) · freqtrade-strategies/berlinguyinca/",
+      "sources": [
+        "AdxSmas.py（趋势跟随）买入：ADX(14)>25 且 SMA(3) 上穿 SMA(6)；卖出：ADX(14)<25 且 SMA(6) 上穿 SMA(3)",
+        "BbandRsi.py（均值回归）买入：RSI<30 且 收盘价<布林下轨；卖出：RSI>70。⚠️ 布林带用**典型价** (H+L+C)/3 —— 官方源码是 qtpylib.typical_price()，不是收盘价",
+        "AwesomeMacd.py（动量双确认）买入：MACD>0 且 AO>0 且 AO 上穿 0；卖出：MACD<0 且 AO<0 且 AO 下穿 0"
+      ],
+      "combine": "三策略各一票，多数胜；三方各一票时记「持有（无共识）」——不设人为倾向",
+      "state": "三条都是穿越/条件型**状态机**：触发后保持到反向触发为止。因此每条各自带 signal_age_days，报告的年龄只取**与最终多数同向**的票里最近那次触发",
+      "error_handling": "策略抛异常 → 该票记为 None **不参与投票**（total 只数有效票），并登记到 failed；绝不把计算失败伪装成「持有」票",
+      "note": "freqtrade 官方模板 sample_strategy.py 条件过苛，实测 9 只一年 0 触发，不采用"
+    },
+    "tradingview": "**已完全移除**（Bob 判定不准确）：既退出判定，也从报告里删掉「第三方」列与分歧说明，collect.py 也不再发那 8 个网络请求。脚本 ghostfolio_ta_benchmark.py 保留为按需离线工具，日常不跑。",
+    "crypto_signal_semantics": "加密侧 AdxSmas 是**穿越型状态机** —— 只在均线穿越那根发信号，之后保持到反向信号。所以输出带 signal_age_days / last_signal_date，报告标注「信号已持续 N 个交易日」，避免把 30 天前的旧状态误读成今天刚出的买入信号。美股侧是当前状态判定，无年龄概念。",
+    "crypto_sources_note": "加密侧已是**三个** freqtrade 社区策略（AdxSmas 趋势跟随 / BbandRsi 均值回归 / AwesomeMacd 动量双确认），源码里都无自定义参数、逻辑不同源 —— 多数表决才名副其实。补票后 BNB 从『无条件买入』变成『卖出（1买2卖）』，暴露了单策略一票独大的问题。",
+    "backtest_warning": "**完整回测 + 样本外切分（references/rule-backtest-2026-09.md）：9 只里只有 BNB 持续跑赢买入持有。** 三段全负：美股/ETF 训练 −5.7% / 验证 −26.9% / 留出 −14.5%。→ 结论**不是全样本过拟合**，样本外同样成立。原因是这些规则本是给可做空/杠杆/短周期的加密机器人设计的，当作「多头/空仓」择时开关用在长期持仓上会因长期空仓而错过上涨。**判定规则仍如实反映各项目的当前判定状态，但报告不得暗示「按此操作能赚钱」。**"
+  },
+  "market_hours_gate": {
+    "script": "ghostfolio_market_open.py",
+    "purpose": "每天 21:00（北京）触发前先判今晚美股开不开市。不开市 → 不采集不生成不推送，只回 [SILENT]。",
+    "principle": "21:00 北京 = 09:00 ET（夏令时）/ 08:00 ET（冬令时），都在 09:30 开盘前，所以「今晚开不开市」等价于「今天（美东日期）是不是纽交所交易日」。",
+    "method": "节假日用规则计算（含复活节算法、周六日的前挪/后挪规则），零依赖、无需年度维护",
+    "verified": "与官方 NYSE 2026 日历逐条吻合（含独立日 7/4 周六→前挪 7/3）；半日市算开市"
+  },
+  "_cleanup_note": "v9.4 清理：删除了已废弃的自研打分配置（scoring / alpha_models / legacy_signal_mapping / thresholds / ml / attribution / signal_schema）。原因：判定已改为公开量化项目的规则投票，这些配置只服务于已废弃的自研打分，留着会让维护者误判「哪个还生效」。 v10.6 追加：删掉 feature_engineering.cache_path / price_cache_path —— grep 全仓无任何 .py 消费，实际路径由 GF_HOME/cache/{prices,features} 推导。",
+  "ml_reliability": "模型可靠度 = |预测幅度| ÷ 模型历史误差（信号噪比）。≥2 高 / ≥1 中 / <1 低。废弃了原来的伪精确 confidence（100*(1-rmse/0.05)*(1+|pred|*10)，RMSE 不是概率、式子无统计含义）。⚠️ 实测 9 只里 8 只都是「低」—— 预测幅度还没模型自己的历史误差大。"
+}

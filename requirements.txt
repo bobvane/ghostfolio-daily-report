@@ -1,0 +1,11 @@
+# Ghostfolio 每日持仓诊断 —— 依赖清单
+# 版本下限从实际运行环境读出，不是估计值。
+lightgbm>=4.7.0
+numpy>=2.5.2
+pandas>=3.0.5
+scikit-learn>=1.9.0
+PySocks>=1.7.1
+yfinance>=1.5.2
+
+# 可选：只有跑 validate_adx_against_talib.py（一次性离线校验）才需要
+ta  # 未固定版本，或直接 pip install TA-Lib
